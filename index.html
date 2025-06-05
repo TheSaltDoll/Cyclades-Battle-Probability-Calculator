@@ -10,7 +10,17 @@
  label{display:inline-block;width:200px}
  input[type=number]{width:4rem}
  select{width:6.5rem}
- #result{margin-top:1rem;font-weight:600}
+
+ /*  NEW: scrolling history pane  */
+ #history{
+   margin-top:1rem;
+   max-height:260px;          /* adjust to taste or make it %-based */
+   overflow-y:auto;
+   border-top:1px solid #aaa;
+   padding-top:.5rem;
+   font-family:monospace;     /* aligns numbers nicely */
+ }
+ .result-entry{margin-bottom:.5rem}
 </style>
 </head>
 <body>
@@ -18,13 +28,13 @@
 
 <!-- numeric inputs -->
 <div class="row"><label>Attacker troops</label>
-  <input id="attTroops" type="number" value="2"   min="0"></div>
+  <input id="attTroops" type="number" value="2" min="0"></div>
 <div class="row"><label>Defender troops</label>
-  <input id="defTroops" type="number" value="1"   min="0"></div>
+  <input id="defTroops" type="number" value="1" min="0"></div>
 <div class="row"><label>Attacker static bonus</label>
-  <input id="attStatic" type="number" value="0"   min="0"></div>
+  <input id="attStatic" type="number" value="0" min="0"></div>
 <div class="row"><label>Defender static bonus</label>
-  <input id="defStatic" type="number" value="0"   min="0"></div>
+  <input id="defStatic" type="number" value="0" min="0"></div>
 
 <!-- hero ownership -->
 <div class="row"><label>Penthesilea owner</label>
@@ -47,113 +57,84 @@
   <input id="defRerolls" type="number" value="0" min="0" max="3"></div>
 
 <button id="calcBtn">Calculate</button>
-<div id="result">Win probability: —</div>
+
+<!--  NEW: rolling history goes here  -->
+<div id="history"></div>
 
 <script>
 // ──────────────────────────────────────────────
-// 1.  Engine helpers (direct port of the Python)
+// 1.  Engine helpers (unchanged)
 // ──────────────────────────────────────────────
-const BASE_FACES = [0,1,1,2,2,3];
-const BASE_P     = 1/6;
-
+const BASE_FACES=[0,1,1,2,2,3],BASE_P=1/6;
 function baseDistribution(hasAntigone){
-  const pmf = {};
-  for(const f of BASE_FACES){
-    const v = (hasAntigone && f===0)?3:f;
-    pmf[v] = (pmf[v]||0)+BASE_P;
-  }
-  return pmf;
-}
-
-function maxDistribution(base, draws){
+  const pmf={};for(const f of BASE_FACES){
+    const v=(hasAntigone&&f===0)?3:f;pmf[v]=(pmf[v]||0)+BASE_P;}return pmf;}
+function maxDistribution(base,draws){
   if(draws===1) return {...base};
-  const values = Object.keys(base).map(Number).sort((a,b)=>a-b);
-  let cum = 0, F = {}, pmf = {}, prev=0;
-  for(const v of values){ cum+=base[v]; F[v]=cum; }
-  for(const v of values){
-    pmf[v] = Math.pow(F[v],draws) - Math.pow(prev,draws);
-    prev = F[v];
-  }
-  return pmf;
-}
-
-function makeDieDistribution(owner, helenOwner, antigOwner, rerolls){
-  owner       = owner.toLowerCase();
-  helenOwner  = helenOwner.toLowerCase();
-  antigOwner  = antigOwner.toLowerCase();
-  const hasHelen    = helenOwner.startsWith(owner);
-  const hasAntigone = antigOwner.startsWith(owner) && !hasHelen;
-
-  if(hasHelen) return [[2,1.0]];            // Helen fixes the die value to 2
-  const base = baseDistribution(hasAntigone);
-  const pmf  = maxDistribution(base, rerolls+1);   // “rerolls + first roll”
-  return Object.entries(pmf).map(([v,p])=>[Number(v),p]);
-}
+  const values=Object.keys(base).map(Number).sort((a,b)=>a-b);
+  let cum=0,F={},pmf={},prev=0;
+  for(const v of values){cum+=base[v];F[v]=cum;}
+  for(const v of values){pmf[v]=Math.pow(F[v],draws)-Math.pow(prev,draws);prev=F[v];}
+  return pmf;}
+function makeDieDistribution(owner,helenOwner,antigOwner,rerolls){
+  owner=owner.toLowerCase();helenOwner=helenOwner.toLowerCase();antigOwner=antigOwner.toLowerCase();
+  const hasHelen=helenOwner.startsWith(owner);
+  const hasAntigone=antigOwner.startsWith(owner)&&!hasHelen;
+  if(hasHelen) return [[2,1.0]];
+  const base=baseDistribution(hasAntigone);
+  const pmf=maxDistribution(base,rerolls+1);
+  return Object.entries(pmf).map(([v,p])=>[Number(v),p]);}
 
 // ──────────────────────────────
-// 2.  Battle class
+// 2.  Battle class (unchanged)
 // ──────────────────────────────
 class Battle{
-  constructor(opts){
-    Object.assign(this, opts);        // A0,D0,SA,SD, tieRule, dice
-    this.memo = new Map();
-  }
-  attackerWinProb(){ return this._p(this.A0,this.D0); }
-
+  constructor(opts){Object.assign(this,opts);this.memo=new Map();}
+  attackerWinProb(){return this._p(this.A0,this.D0);}
   _p(a,d){
-    if(a<=0) return 0;
-    if(d<=0) return 1;
-    const key=`${a},${d}`;
-    if(this.memo.has(key)) return this.memo.get(key);
-
-    let total = 0;
+    if(a<=0) return 0;if(d<=0) return 1;
+    const key=`${a},${d}`;if(this.memo.has(key)) return this.memo.get(key);
+    let total=0;
     for(const [fa,pa] of this.attDie){
       for(const [fd,pd] of this.defDie){
-        const attTot = a + fa + this.SA;
-        const defTot = d + fd + this.SD;
-        let na=a, nd=d;
-
-        if(attTot>defTot)         nd--;
-        else if(defTot>attTot)    na--;
-        else{                     // tie
-          if (this.tieRule===1)   nd--;
-          else if(this.tieRule===2) na--;
-          else { na--; nd--; }
-        }
-        total += pa*pd*this._p(na,nd);
-      }
-    }
-    this.memo.set(key,total);
-    return total;
-  }
-}
+        const attTot=a+fa+this.SA,defTot=d+fd+this.SD;let na=a,nd=d;
+        if(attTot>defTot) nd--;else if(defTot>attTot) na--;
+        else{if(this.tieRule===1) nd--;else if(this.tieRule===2) na--;else{na--;nd--;}}
+        total+=pa*pd*this._p(na,nd);}}
+    this.memo.set(key,total);return total;}}
 
 // ──────────────────────────────
-// 3.  Wire up the GUI
+// 3.  GUI wiring  (NEW history logic)
 // ──────────────────────────────
-function readValue(id){ return document.getElementById(id).value; }
+const $ = id => document.getElementById(id);
 
-document.getElementById('calcBtn').addEventListener('click', ()=>{
+$('calcBtn').addEventListener('click',()=>{
   // collect parameters
-  const opts = {
-    A0: +readValue('attTroops'),
-    D0: +readValue('defTroops'),
-    SA: +readValue('attStatic'),
-    SD: +readValue('defStatic'),
+  const opts={
+    A0:+$('attTroops').value,
+    D0:+$('defTroops').value,
+    SA:+$('attStatic').value,
+    SD:+$('defStatic').value,
   };
+  const pent=$('pent').value;
+  opts.tieRule=pent==="Attacker"?1: pent==="Defender"?2: 0;
 
-  const pent = readValue('pent');
-  opts.tieRule = pent==="Att" ? 1 : pent==="Def" ? 2 : 0;
+  // dice
+  opts.attDie=makeDieDistribution("att",$('helen').value,$('antigone').value,+$('attRerolls').value);
+  opts.defDie=makeDieDistribution("def",$('helen').value,$('antigone').value,+$('defRerolls').value);
 
-  // build dice
-  opts.attDie = makeDieDistribution("att", readValue('helen'), readValue('antigone'), +readValue('attRerolls'));
-  opts.defDie = makeDieDistribution("def", readValue('helen'), readValue('antigone'), +readValue('defRerolls'));
+  const prob=(new Battle(opts)).attackerWinProb()*100;
 
-  const battle = new Battle(opts);
-  const prob   = battle.attackerWinProb()*100;
+  // compact summary of inputs
+  const summary=`A:${opts.A0}, D:${opts.D0}, SA:${opts.SA}, SD:${opts.SD}, `+
+                `Pent:${pent}, Hel:${$('helen').value}, Ant:${$('antigone').value}, `+
+                `AR:${$('attRerolls').value}, DR:${$('defRerolls').value}`;
 
-  document.getElementById('result').textContent =
-    `Win probability (attacker): ${prob.toFixed(2)} %`;
+  // prepend new entry to history
+  const entry=document.createElement('div');
+  entry.className='result-entry';
+  entry.textContent=`Win: ${prob.toFixed(2)} %  |  ${summary}`;
+  $('history').prepend(entry);
 });
 </script>
 </body>
