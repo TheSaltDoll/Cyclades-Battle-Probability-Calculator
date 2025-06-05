@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cyclades Battle Probability Calculator</title>
+<style>
+ body{font-family:sans-serif;max-width:680px;margin:1.25rem auto;padding:0 .5rem}
+ h1{font-size:1.6rem;margin-bottom:.5rem}
+ .row{margin:.35rem 0}
+ label{display:inline-block;width:200px}
+ input[type=number]{width:4rem}
+ select{width:6.5rem}
+ #result{margin-top:1rem;font-weight:600}
+</style>
+</head>
+<body>
+<h1>Cyclades Battle Probability</h1>
+
+<!-- numeric inputs -->
+<div class="row"><label>Attacker troops</label>
+  <input id="attTroops" type="number" value="2"   min="0"></div>
+<div class="row"><label>Defender troops</label>
+  <input id="defTroops" type="number" value="1"   min="0"></div>
+<div class="row"><label>Attacker static bonus</label>
+  <input id="attStatic" type="number" value="0"   min="0"></div>
+<div class="row"><label>Defender static bonus</label>
+  <input id="defStatic" type="number" value="0"   min="0"></div>
+
+<!-- hero ownership -->
+<div class="row"><label>Penthesilea owner</label>
+  <select id="pent">
+    <option>None</option><option>Att</option><option>Def</option>
+  </select></div>
+<div class="row"><label>Helen owner</label>
+  <select id="helen">
+    <option>None</option><option>Att</option><option>Def</option>
+  </select></div>
+<div class="row"><label>Antigone owner</label>
+  <select id="antigone">
+    <option>None</option><option>Att</option><option>Def</option>
+  </select></div>
+
+<!-- rerolls -->
+<div class="row"><label>Attacker rerolls (0-3)</label>
+  <input id="attRerolls" type="number" value="0" min="0" max="3"></div>
+<div class="row"><label>Defender rerolls (0-3)</label>
+  <input id="defRerolls" type="number" value="0" min="0" max="3"></div>
+
+<button id="calcBtn">Calculate</button>
+<div id="result">Win probability: —</div>
+
+<script>
+// ──────────────────────────────────────────────
+// 1.  Engine helpers (direct port of the Python)
+// ──────────────────────────────────────────────
+const BASE_FACES = [0,1,1,2,2,3];
+const BASE_P     = 1/6;
+
+function baseDistribution(hasAntigone){
+  const pmf = {};
+  for(const f of BASE_FACES){
+    const v = (hasAntigone && f===0)?3:f;
+    pmf[v] = (pmf[v]||0)+BASE_P;
+  }
+  return pmf;
+}
+
+function maxDistribution(base, draws){
+  if(draws===1) return {...base};
+  const values = Object.keys(base).map(Number).sort((a,b)=>a-b);
+  let cum = 0, F = {}, pmf = {}, prev=0;
+  for(const v of values){ cum+=base[v]; F[v]=cum; }
+  for(const v of values){
+    pmf[v] = Math.pow(F[v],draws) - Math.pow(prev,draws);
+    prev = F[v];
+  }
+  return pmf;
+}
+
+function makeDieDistribution(owner, helenOwner, antigOwner, rerolls){
+  owner       = owner.toLowerCase();
+  helenOwner  = helenOwner.toLowerCase();
+  antigOwner  = antigOwner.toLowerCase();
+  const hasHelen    = helenOwner.startsWith(owner);
+  const hasAntigone = antigOwner.startsWith(owner) && !hasHelen;
+
+  if(hasHelen) return [[2,1.0]];            // Helen fixes the die value to 2
+  const base = baseDistribution(hasAntigone);
+  const pmf  = maxDistribution(base, rerolls+1);   // “rerolls + first roll”
+  return Object.entries(pmf).map(([v,p])=>[Number(v),p]);
+}
+
+// ──────────────────────────────
+// 2.  Battle class
+// ──────────────────────────────
+class Battle{
+  constructor(opts){
+    Object.assign(this, opts);        // A0,D0,SA,SD, tieRule, dice
+    this.memo = new Map();
+  }
+  attackerWinProb(){ return this._p(this.A0,this.D0); }
+
+  _p(a,d){
+    if(a<=0) return 0;
+    if(d<=0) return 1;
+    const key=`${a},${d}`;
+    if(this.memo.has(key)) return this.memo.get(key);
+
+    let total = 0;
+    for(const [fa,pa] of this.attDie){
+      for(const [fd,pd] of this.defDie){
+        const attTot = a + fa + this.SA;
+        const defTot = d + fd + this.SD;
+        let na=a, nd=d;
+
+        if(attTot>defTot)         nd--;
+        else if(defTot>attTot)    na--;
+        else{                     // tie
+          if (this.tieRule===1)   nd--;
+          else if(this.tieRule===2) na--;
+          else { na--; nd--; }
+        }
+        total += pa*pd*this._p(na,nd);
+      }
+    }
+    this.memo.set(key,total);
+    return total;
+  }
+}
+
+// ──────────────────────────────
+// 3.  Wire up the GUI
+// ──────────────────────────────
+function readValue(id){ return document.getElementById(id).value; }
+
+document.getElementById('calcBtn').addEventListener('click', ()=>{
+  // collect parameters
+  const opts = {
+    A0: +readValue('attTroops'),
+    D0: +readValue('defTroops'),
+    SA: +readValue('attStatic'),
+    SD: +readValue('defStatic'),
+  };
+
+  const pent = readValue('pent');
+  opts.tieRule = pent==="Att" ? 1 : pent==="Def" ? 2 : 0;
+
+  // build dice
+  opts.attDie = makeDieDistribution("att", readValue('helen'), readValue('antigone'), +readValue('attRerolls'));
+  opts.defDie = makeDieDistribution("def", readValue('helen'), readValue('antigone'), +readValue('defRerolls'));
+
+  const battle = new Battle(opts);
+  const prob   = battle.attackerWinProb()*100;
+
+  document.getElementById('result').textContent =
+    `Win probability (attacker): ${prob.toFixed(2)} %`;
+});
+</script>
+</body>
+</html>
