@@ -25,20 +25,20 @@
 </head>
 <body>
 <h1>Cyclades Battle Probability</h1>
-<p>Instructions: The number of troops refers to the number of units that can be removed as casualities.
- Static bonus means bonuses from buildings or from units that give a bonus.
- For example, it the attacker has 1 troop and Ajax the hero their troops value would be 2 and their static bonus would be 1.</p>
+<p>Instructions: The number of Units refers to the number of individual Units that can be removed as casualities. This includes Troops, Mercenaries, Heros, Fleets, and Minotaur.
+ Static Bonus means bonuses from buildings or from Units that give a bonus.
+ For example, if the attacker has 1 troop and Ajax the hero, their Units value would be 2 and their Static Bonus would be 1.</p>
 <p>The player with Penthesilea wins ties. The player with Helen always considers their die rolls to be 2 (this supercedes other Hero abilities). The player with Antigone considers rolls of 0 as 3.</p>
 <p>To simulate a player having the hero Croesus, enter the number of rerolls the player would be willing to pay for (at 1GP per reroll).</p>
  
 <!-- numeric inputs -->
-<div class="row"><label>Attacker troops</label>
+<div class="row"><label>Attacker Units</label>
   <input id="attTroops" type="number" value="2" min="0"></div>
-<div class="row"><label>Defender troops</label>
+<div class="row"><label>Defender Units</label>
   <input id="defTroops" type="number" value="1" min="0"></div>
-<div class="row"><label>Attacker static bonus</label>
+<div class="row"><label>Attacker Static Bonus</label>
   <input id="attStatic" type="number" value="0" min="0"></div>
-<div class="row"><label>Defender static bonus</label>
+<div class="row"><label>Defender Static Bonus</label>
   <input id="defStatic" type="number" value="0" min="0"></div>
 
 <!-- hero ownership -->
